@@ -10,6 +10,8 @@
 # define USE_CUSTOM_OPS 0
 #endif
 
+// fallback classic XS function definition
+
 static void
 THX_xsfunc_is_arrayref (pTHX_ CV *cv)
 {
@@ -21,8 +23,11 @@ THX_xsfunc_is_arrayref (pTHX_ CV *cv)
     PUSHs( res );
 }
 
+// preparations for custom op behavior starts here
+
 #if USE_CUSTOM_OPS //  USE_CUSTOM_OPS
 
+    // custom op function, functionally equivalent to fallback XS function
     static OP *
     is_arrayref_pp(pTHX)
     {
@@ -88,6 +93,8 @@ THX_xsfunc_is_arrayref (pTHX_ CV *cv)
 
 #endif
 
+// XS module definition
+
 MODULE = Ref::Util		PACKAGE = Ref::Util
 
 PROTOTYPES: DISABLE
@@ -95,17 +102,23 @@ PROTOTYPES: DISABLE
 BOOT:
     {
 #if !USE_CUSTOM_OPS // ! USE_CUSTOM_OPS
+        // installs a classic XS function, as per perlapi
         newXSproto(
             "Ref::Util::is_arrayref", THX_xsfunc_is_arrayref, __FILE__, "$"
         );
 #else // ! USE_CUSTOM_OPS
+        // installs an XS function and returns its CV for later use
+        // provided by ExtUtils::ParseXS::Utilities::standard_XS_defs
         CV *cv = newXSproto_portable(
             "Ref::Util::is_arrayref", THX_xsfunc_is_arrayref, __FILE__, "$"
         );
+        // tie op replacement function to XS function call
         cv_set_call_checker(cv, THX_ck_entersub_args_is_arrayref, (SV*)cv);
+        // set up custom op structure, see perlguts.html#Custom-Operators
         static XOP is_arrayref_xop;
         XopENTRY_set(&is_arrayref_xop, xop_name, "is_arrayref_xop");
         XopENTRY_set(&is_arrayref_xop, xop_desc, "OP DESCRIPTION HERE");
+        // register is_arrayref_pp as a custom op with Perl interpreter
         Perl_custom_op_register(aTHX_ is_arrayref_pp, &is_arrayref_xop);
 #endif // ! USE_CUSTOM_OPS
     }
