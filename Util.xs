@@ -15,9 +15,9 @@
 static void
 THX_xsfunc_is_arrayref (pTHX_ CV *cv)
 {
-    dXSARGS;
-    if (items != 1)
-        Perl_croak(aTHX_ "Usage: Ref::Util::is_arrayref(ref)");
+    dXSARGS;                                                    // arg count is done explicitly here, but
+    if (items != 1)                                             // handled by ck_entersub_args_proto at
+        Perl_croak(aTHX_ "Usage: Ref::Util::is_arrayref(ref)"); // compile time for the op
     SV *ref = POPs;
     SV *res = (SvROK(ref) && (SvTYPE(SvRV(ref)) == SVt_PVAV)) ? &PL_sv_yes : &PL_sv_no;
     PUSHs( res );
@@ -31,12 +31,12 @@ THX_xsfunc_is_arrayref (pTHX_ CV *cv)
     static OP *
     is_arrayref_pp(pTHX)
     {
-        dSP;
+        dSP;     // prepare the stack for access
         SV *ref = POPs;
         SV *res = (SvROK(ref) && (SvTYPE(SvRV(ref)) == SVt_PVAV)) ? &PL_sv_yes : &PL_sv_no;
         PUSHs( res );
-        PUTBACK;
-        return NORMAL;
+        PUTBACK; // resynchronize the stack
+        return NORMAL; // let the op tree processor know this op completed successfully
     }
 
     // This function extracts the args for the custom op, and deletes the remaining
