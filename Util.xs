@@ -10,164 +10,83 @@
 # define USE_CUSTOM_OPS 0
 #endif
 
-/* Boolean expression that considers an SV* named "ref" */
-#define COND(expr) (SvROK(ref) && expr)
+static void
+THX_xsfunc_is_arrayref (pTHX_ CV *cv)
+{
+    dXSARGS;
+    if (items != 1)
+        Perl_croak(aTHX_ "Usage: Ref::Util::is_arrayref(ref)");
+    SV *ref = POPs;
+    SV *res = (SvROK(ref) && (SvTYPE(SvRV(ref)) == SVt_PVAV)) ? &PL_sv_yes : &PL_sv_no;
+    PUSHs( res );
+}
 
-#define PLAIN         (!sv_isobject(ref))
-#define REFTYPE(tail) (SvTYPE(SvRV(ref)) tail)
-#define REFREF        (SvROK( SvRV(ref) ))
+#if USE_CUSTOM_OPS //  USE_CUSTOM_OPS
 
-#define JUSTSCALAR (                            \
-        REFTYPE(< SVt_PVAV)                     \
-        && REFTYPE(!= SVt_PVGV)                 \
-        && (SvTYPE(SvRV(ref)) != SVt_PVGV)      \
-        && !REFREF                              \
-        && !SvRXOK(ref)                         \
-        )
-
-#if PERL_VERSION >= 7
-#define FORMATREF REFTYPE(== SVt_PVFM)
-#else
-#define FORMATREF (croak("is_formatref() isn't available on Perl 5.6.x and under"), 0)
-#endif
-
-#define FUNC_BODY(cond)                                 \
-    SV *ref = POPs;                                     \
-    PUSHs( COND(cond) ? &PL_sv_yes : &PL_sv_no )
-
-#define DECL_RUNTIME_FUNC(x, cond)                              \
-    static void                                                 \
-    THX_xsfunc_ ## x (pTHX_ CV *cv)                             \
-    {                                                           \
-        dXSARGS;                                                \
-        if (items != 1)                                         \
-            Perl_croak(aTHX_ "Usage: Ref::Util::" #x "(ref)");  \
-        FUNC_BODY(cond);                                        \
+    static OP *
+    is_arrayref_pp(pTHX)
+    {
+        dSP;
+        SV *ref = POPs;
+        SV *res = (SvROK(ref) && (SvTYPE(SvRV(ref)) == SVt_PVAV)) ? &PL_sv_yes : &PL_sv_no;
+        PUSHs( res );
+        PUTBACK;
+        return NORMAL;
     }
 
-#define DECL_XOP(x) \
-    static XOP x ## _xop;
+    // This function extracts the args for the custom op, and deletes the remaining
+    // ops from memory, so they can then be replaced entirely by the custom op.
+    static OP *
+    THX_ck_entersub_args_is_arrayref(pTHX_ OP *entersubop, GV *namegv, SV *ckobj)
+    {
+        /* fix up argument structures */
+        entersubop = ck_entersub_args_proto(entersubop, namegv, ckobj);
 
-#define DECL_MAIN_FUNC(x, cond)                 \
-    static OP *                                 \
-    x ## _pp(pTHX)                              \
-    {                                           \
-        dSP;                                    \
-        FUNC_BODY(cond);                        \
-        PUTBACK;                                \
-        return NORMAL;                          \
-    }
+        /* extract the args for the custom op, and delete the remaining ops
+           NOTE: this is the *single* arg version, multi-arg is more
+           complicated, see Hash::SharedMem's THX_ck_entersub_args_hsm */
 
-// This function extracts the args for the custom op, and deletes the remaining
-// ops from memory, so they can then be replaced entirely by the custom op.
-#define DECL_CALL_CHK_FUNC(x)                                               \
-    static OP *                                                             \
-    THX_ck_entersub_args_ ## x(pTHX_ OP *entersubop, GV *namegv, SV *ckobj) \
-    {                                                                       \
-        /* fix up argument structures */                                    \
-        entersubop = ck_entersub_args_proto(entersubop, namegv, ckobj);     \
-                                                                            \
-        /* extract the args for the custom op, and delete the remaining ops \
-           NOTE: this is the *single* arg version, multi-arg is more        \
-           complicated, see Hash::SharedMem's THX_ck_entersub_args_hsm */   \
-                                                                            \
-        /* These comments will visualize how the op tree look like after    \
-           each operation. We usually start out with this: */               \
-        /*** entersub( list( push, arg1, cv ) ) */                          \
-        /* Though in rare cases it can also look like this: */              \
-        /*** entersub( push, arg1, cv ) */                                  \
-                                                                            \
-        /* first, get the real pushop, after which comes the arg list */    \
-        OP *pushop = cUNOPx( entersubop )->op_first;    /* Cast the entersub op as an op with a single child            \
-                                                           and get that child (the args list or pushop). */             \
-        if( !OpHAS_SIBLING( pushop ) )          /* Go one layer deeper to get at the real pushop. */                    \
-          pushop = cUNOPx( pushop )->op_first;  /* (Sometimes not necessary when pushop is directly on entersub.) */    \
-                                                                            \
-        /* then extract the arg */                                          \
-        OP *arg = OpSIBLING( pushop );  /* Get a pointer to the first arg op                                            \
-                                           so we can attach it to the custom op later on. */                            \
-        /*** entersub( list( push, arg1, cv ) ) + ( arg1, cv ) */           \
-                                                                            \
-        /* and prepare to delete the other ops */                           \
-        OpMORESIB_set( pushop, OpSIBLING( arg ) );  /* Replace the first op of the arg list with the last arg op        \
-                                                       (the cv op, i.e. pointer to original xs function),               \
-                                                       which allows recursive deletion of all unneeded ops              \
-                                                       while keeping the arg list. */                                   \
-        /*** entersub( list( push, cv ) ) + ( arg1, cv ) */                 \
-                                                                            \
-        OpLASTSIB_set( arg, NULL ); /* Remove the trailing cv op from the arg list,                                     \
-                                       by declaring the arg to be the last sibling in the arg list. */                  \
-        /*** entersub( list( push, cv ) ) + ( arg1 ) */                     \
-                                                                            \
-        op_free( entersubop );  /* Recursively free entersubop + children, as it'll be replaced by the op we return. */ \
-        /*** ( arg1 ) */                                                    \
-                                                                            \
-        /* create and return new op */                                      \
-        OP *newop = newUNOP( OP_NULL, 0, arg );                             \
-        newop->op_type   = OP_CUSTOM;   /* can't do this in the new above, due to crashes pre-5.22 */                   \
-        newop->op_ppaddr = x ## _pp;                                        \
-        /*** custom_op( arg1 ) */                                           \
-                                                                            \
-        return newop;                                                       \
-    }
+        /* These comments will visualize how the op tree look like after
+           each operation. We usually start out with this: */
+        /*** entersub( list( push, arg1, cv ) ) */
+        /* Though in rare cases it can also look like this: */
+        /*** entersub( push, arg1, cv ) */
 
-#if !USE_CUSTOM_OPS
+        /* first, get the real pushop, after which comes the arg list */
+        OP *pushop = cUNOPx( entersubop )->op_first;    /* Cast the entersub op as an op with a single child
+                                                           and get that child (the args list or pushop). */
+        if( !OpHAS_SIBLING( pushop ) )          /* Go one layer deeper to get at the real pushop. */
+          pushop = cUNOPx( pushop )->op_first;  /* (Sometimes not necessary when pushop is directly on entersub.) */
 
-#define DECL(x, cond) DECL_RUNTIME_FUNC(x, cond)
-#define INSTALL(x, ref) \
-    newXSproto("Ref::Util::" #x, THX_xsfunc_ ## x, __FILE__, "$");
+        /* then extract the arg */
+        OP *arg = OpSIBLING( pushop );  /* Get a pointer to the first arg op
+                                           so we can attach it to the custom op later on. */
+        /*** entersub( list( push, arg1, cv ) ) + ( arg1, cv ) */
 
-#else
+        /* and prepare to delete the other ops */
+        OpMORESIB_set( pushop, OpSIBLING( arg ) ); /* Replace the first op of the arg list with the last arg op
+                                                      (the cv op, i.e. pointer to original xs function),
+                                                      which allows recursive deletion of all unneeded ops
+                                                      while keeping the arg list. */
+        /*** entersub( list( push, cv ) ) + ( arg1, cv ) */
 
-#define DECL(x, cond)                           \
-    DECL_RUNTIME_FUNC(x, cond)                  \
-    DECL_XOP(x)                                 \
-    DECL_MAIN_FUNC(x, cond)                     \
-    DECL_CALL_CHK_FUNC(x)
+        OpLASTSIB_set( arg, NULL ); /* Remove the trailing cv op from the arg list,
+                                       by declaring the arg to be the last sibling in the arg list. */
+        /*** entersub( list( push, cv ) ) + ( arg1 ) */
 
-#define INSTALL(x, ref)                                                \
-    {                                                                 \
-        XopENTRY_set(& x ##_xop, xop_name, #x "_xop");                \
-        XopENTRY_set(& x ##_xop, xop_desc, "'" ref "' ref check");    \
-        Perl_custom_op_register(aTHX_ x ##_pp, & x ##_xop);           \
-        CV *cv = newXSproto_portable(                                 \
-            "Ref::Util::" #x, THX_xsfunc_ ## x, __FILE__, "$"         \
-        );                                                            \
-        cv_set_call_checker(cv, THX_ck_entersub_args_ ## x, (SV*)cv); \
+        op_free( entersubop );    /* Recursively free entersubop + children, as it'll be replaced by the op we return. */
+        /*** ( arg1 ) */
+
+        /* create and return new op */
+        OP *newop = newUNOP( OP_NULL, 0, arg );
+        newop->op_type   = OP_CUSTOM; /* can't do this in the new above, due to crashes pre-5.22 */
+        newop->op_ppaddr = is_arrayref_pp;
+        /*** custom_op( arg1 ) */
+
+        return newop;
     }
 
 #endif
-
-DECL(is_ref,             1)
-DECL(is_scalarref,       JUSTSCALAR)
-DECL(is_arrayref,        REFTYPE(== SVt_PVAV))
-DECL(is_hashref,         REFTYPE(== SVt_PVHV))
-DECL(is_coderef,         REFTYPE(== SVt_PVCV))
-DECL(is_globref,         REFTYPE(== SVt_PVGV))
-DECL(is_formatref,       FORMATREF)
-DECL(is_ioref,           REFTYPE(== SVt_PVIO))
-DECL(is_regexpref,       SvRXOK(ref))
-DECL(is_refref,          REFREF)
-
-DECL(is_plain_ref,       PLAIN)
-DECL(is_plain_scalarref, JUSTSCALAR && PLAIN)
-DECL(is_plain_arrayref,  REFTYPE(== SVt_PVAV) && PLAIN)
-DECL(is_plain_hashref,   REFTYPE(== SVt_PVHV) && PLAIN)
-DECL(is_plain_coderef,   REFTYPE(== SVt_PVCV) && PLAIN)
-DECL(is_plain_globref,   REFTYPE(== SVt_PVGV) && PLAIN)
-DECL(is_plain_formatref, FORMATREF && PLAIN)
-DECL(is_plain_ioref,     REFTYPE(== SVt_PVIO) && PLAIN)
-DECL(is_plain_refref,    REFREF && PLAIN)
-
-DECL(is_blessed_ref,       !PLAIN)
-DECL(is_blessed_scalarref, JUSTSCALAR && !PLAIN)
-DECL(is_blessed_arrayref,  REFTYPE(== SVt_PVAV) && !PLAIN)
-DECL(is_blessed_hashref,   REFTYPE(== SVt_PVHV) && !PLAIN)
-DECL(is_blessed_coderef,   REFTYPE(== SVt_PVCV) && !PLAIN)
-DECL(is_blessed_globref,   REFTYPE(== SVt_PVGV) && !PLAIN)
-DECL(is_blessed_formatref, FORMATREF && !PLAIN)
-DECL(is_blessed_ioref,     REFTYPE(== SVt_PVIO) && !PLAIN)
-DECL(is_blessed_refref,    REFREF && !PLAIN)
 
 MODULE = Ref::Util		PACKAGE = Ref::Util
 
@@ -175,30 +94,18 @@ PROTOTYPES: DISABLE
 
 BOOT:
     {
-        INSTALL( is_ref, "" )
-        INSTALL( is_scalarref, "SCALAR" )
-        INSTALL( is_arrayref,  "ARRAY"  )
-        INSTALL( is_hashref,   "HASH"   )
-        INSTALL( is_coderef,   "CODE"   )
-        INSTALL( is_regexpref, "REGEXP" )
-        INSTALL( is_globref,   "GLOB"   )
-        INSTALL( is_formatref, "FORMAT" )
-        INSTALL( is_ioref,     "IO"     )
-        INSTALL( is_refref,    "REF"    )
-        INSTALL( is_plain_ref, "plain" )
-        INSTALL( is_plain_scalarref, "plain SCALAR" )
-        INSTALL( is_plain_arrayref,  "plain ARRAY"  )
-        INSTALL( is_plain_hashref,   "plain HASH"   )
-        INSTALL( is_plain_coderef,   "plain CODE"   )
-        INSTALL( is_plain_globref,   "plain GLOB"   )
-        INSTALL( is_plain_formatref,   "plain FORMAT"   )
-        INSTALL( is_plain_refref,   "plain REF"   )
-        INSTALL( is_blessed_ref, "blessed" )
-        INSTALL( is_blessed_scalarref, "blessed SCALAR" )
-        INSTALL( is_blessed_arrayref,  "blessed ARRAY"  )
-        INSTALL( is_blessed_hashref,   "blessed HASH"   )
-        INSTALL( is_blessed_coderef,   "blessed CODE"   )
-        INSTALL( is_blessed_globref,   "blessed GLOB"   )
-        INSTALL( is_blessed_formatref,   "blessed FORMAT"   )
-        INSTALL( is_blessed_refref,   "blessed REF"   )
+#if !USE_CUSTOM_OPS // ! USE_CUSTOM_OPS
+        newXSproto(
+            "Ref::Util::is_arrayref", THX_xsfunc_is_arrayref, __FILE__, "$"
+        );
+#else // ! USE_CUSTOM_OPS
+        CV *cv = newXSproto_portable(
+            "Ref::Util::is_arrayref", THX_xsfunc_is_arrayref, __FILE__, "$"
+        );
+        cv_set_call_checker(cv, THX_ck_entersub_args_is_arrayref, (SV*)cv);
+        static XOP is_arrayref_xop;
+        XopENTRY_set(&is_arrayref_xop, xop_name, "is_arrayref_xop");
+        XopENTRY_set(&is_arrayref_xop, xop_desc, "OP DESCRIPTION HERE");
+        Perl_custom_op_register(aTHX_ is_arrayref_pp, &is_arrayref_xop);
+#endif // ! USE_CUSTOM_OPS
     }

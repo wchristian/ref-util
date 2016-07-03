@@ -10,12 +10,13 @@ my $bench = Dumbbench->new(
     initial_runs         => 20,    # the higher the more reliable
 );
 
+my $max = 1e6;
 my $ref = [];
 no warnings;
 $bench->add_instances(
     Dumbbench::Instance::PerlSub->new(
         name => 'Ref::Util',
-        code => sub { Ref::Util::is_plain_arrayref($ref) for ( 1 .. 1e5 ) },
+        code => sub { Ref::Util::is_plain_arrayref($ref) for ( 1 .. $max ) },
     ),
 
     Dumbbench::Instance::PerlSub->new(
@@ -24,13 +25,13 @@ $bench->add_instances(
             ref $ref
                 && Scalar::Util::reftype($ref) eq 'ARRAY'
                 && !Scalar::Util::blessed($ref)
-                for ( 1 .. 1e5 );
+                for ( 1 .. $max );
         },
     ),
 
     Dumbbench::Instance::PerlSub->new(
         name => 'simple ref()',
-        code => sub { ref($ref) eq 'ARRAY' for ( 1 .. 1e7 ) },
+        code => sub { ref($ref) eq 'ARRAY' for ( 1 .. $max ) },
     ),
 );
 
