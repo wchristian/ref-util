@@ -24,12 +24,17 @@ int mix(int a, int b, int c) {
 
 // common XS code
 
-#define MIX_XS                          \
-    int c = POPi;                       \
-    int b = POPi;                       \
-    int a = POPi;                       \
-    dXSTARG; /* required by PUSHi */    \
+static void
+mix_xs(pTHX)
+{
+    dSP;     // prepare the stack for access
+    int c = POPi;
+    int b = POPi;
+    int a = POPi;
+    dXSTARG; /* required by PUSHi */
     PUSHi( mix(a, b, c) );
+    PUTBACK; // resynchronize the stack
+}
 
 // fallback classic XS function definition
 
@@ -39,8 +44,7 @@ THX_xsfunc_mix (pTHX_ CV *cv)
     dXSARGS;                                              // arg count is done explicitly here, but
     if (items != 3)                                             // handled by ck_entersub_args_proto at
        croak_xs_usage(cv,  "a, b, c");                          // compile time for the op
-    MIX_XS;
-    XSRETURN(1);
+    mix_xs(aTHX);
 }
 
 // preparations for custom op behavior starts here
@@ -51,9 +55,7 @@ THX_xsfunc_mix (pTHX_ CV *cv)
     static OP *
     mix_pp(pTHX)
     {
-        dSP;     // prepare the stack for access
-        MIX_XS;
-        PUTBACK; // resynchronize the stack
+        mix_xs(aTHX);
         return NORMAL; // let the op tree processor know this op completed successfully
     }
 
