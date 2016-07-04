@@ -131,6 +131,22 @@ THX_xsfunc_mix (pTHX_ CV *cv)
         return newop;
     }
 
+    // Installs the call checker and custom op onto the given xs function.
+    static void
+    install_xop(pTHX_ CV *cv, Perl_call_checker checker, const char *op_name, const char *op_desc, Perl_ppaddr_t ppfunc)
+    {
+        // tie op replacement function to XS function call
+        cv_set_call_checker(cv, checker, (SV*)cv);
+
+        // set up custom op structure, see perlguts.html#Custom-Operators
+        static XOP xop;
+        XopENTRY_set(&xop, xop_name, op_name);
+        XopENTRY_set(&xop, xop_desc, op_desc);
+
+        // register mix_pp as a custom op with Perl interpreter
+        Perl_custom_op_register(aTHX_ ppfunc, &xop);
+    }
+
 #endif
 
 // XS module definition
@@ -141,19 +157,12 @@ PROTOTYPES: DISABLE
 
 BOOT:
     {
-    // Installs a classic XS function and returns its CV for later use,
-    // provided by ExtUtils::ParseXS::Utilities::standard_XS_defs.
-    CV *cv_mix = newXSproto_portable(
-        "Hello::World::mix", THX_xsfunc_mix, __FILE__, "$$$"
-    );
-#ifdef USE_CUSTOM_OPS // ! USE_CUSTOM_OPS
-        // tie op replacement function to XS function call
-        cv_set_call_checker(cv_mix, THX_ck_entersub_args_mix, (SV*)cv_mix);
-        // set up custom op structure, see perlguts.html#Custom-Operators
-        static XOP mix_xop;
-        XopENTRY_set(&mix_xop, xop_name, "mix_xop");
-        XopENTRY_set(&mix_xop, xop_desc, "OP DESCRIPTION HERE");
-        // register mix_pp as a custom op with Perl interpreter
-        Perl_custom_op_register(aTHX_ mix_pp, &mix_xop);
-#endif // ! USE_CUSTOM_OPS
+        // newXSproto_portable installs a classic XS function and feeds its CV
+        // to install_xs_func, if possible, which installs a call checker and
+        // custom op that will replace the XS function at compile time.
+        // newXSproto_portable provided by ExtUtils::ParseXS::Utilities::standard_XS_defs.
+        CV *mix_cv = newXSproto_portable("Hello::World::mix", THX_xsfunc_mix, __FILE__, "$$$");
+#ifdef USE_CUSTOM_OPS // USE_CUSTOM_OPS
+        install_xop(aTHX_ mix_cv, THX_ck_entersub_args_mix, "mix_xop", "mix does some math", mix_pp);
+#endif // USE_CUSTOM_OPS
     }
