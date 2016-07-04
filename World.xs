@@ -22,6 +22,15 @@ int mix(int a, int b, int c) {
     return c;
 }
 
+// common XS code
+
+#define MIX_XS                          \
+    int c = POPi;                       \
+    int b = POPi;                       \
+    int a = POPi;                       \
+    dXSTARG; /* required by PUSHi */    \
+    PUSHi( mix(a, b, c) );
+
 // fallback classic XS function definition
 
 static void
@@ -30,11 +39,7 @@ THX_xsfunc_mix (pTHX_ CV *cv)
     dXSARGS;                                              // arg count is done explicitly here, but
     if (items != 3)                                             // handled by ck_entersub_args_proto at
        croak_xs_usage(cv,  "a, b, c");                          // compile time for the op
-    int c = POPi;
-    int b = POPi;
-    int a = POPi;
-    dXSTARG; // required by PUSHi
-    PUSHi( mix(a, b, c) );
+    MIX_XS;
     XSRETURN(1);
 }
 
@@ -47,19 +52,19 @@ THX_xsfunc_mix (pTHX_ CV *cv)
     mix_pp(pTHX)
     {
         dSP;     // prepare the stack for access
-        int c = POPi;
-        int b = POPi;
-        int a = POPi;
-        dXSTARG; // required by PUSHi
-        PUSHi( mix(a, b, c) );
+        MIX_XS;
         PUTBACK; // resynchronize the stack
         return NORMAL; // let the op tree processor know this op completed successfully
     }
 
-    // This function extracts the args for the custom op, and deletes the remaining
-    // ops from memory, so they can then be replaced entirely by the custom op.
+    // This function extracts the args for the custom op, deletes the remaining
+    // ops from memory, and constructs a new custom op which will replace the
+    // original entersub op.
+    // Note that this is a generalized function which returns the custom op
+    // without a function attached. You will need to do this attaching in a
+    // a function-specific wrapper.
     static OP *
-    THX_ck_entersub_args_mix(pTHX_ OP *entersubop, GV *namegv, SV *ckobj)
+    THX_ck_entersub_args(pTHX_ OP *entersubop, GV *namegv, SV *ckobj)
     {
         /* fix up argument structures */
         entersubop = ck_entersub_args_proto(entersubop, namegv, ckobj);
@@ -109,9 +114,18 @@ THX_xsfunc_mix (pTHX_ CV *cv)
         /* create and return new op */
         OP *newop = newUNOP( OP_NULL, 0, firstargop );
         newop->op_type   = OP_CUSTOM; /* can't do this in the new above, due to crashes pre-5.22 */
-        newop->op_ppaddr = mix_pp;
         /*** custom_op( arg1, arg2, arg3 ) */
 
+        return newop;
+    }
+
+    // This is the wrapper function which creates a new custom op and attaches
+    // the right op function to it.
+    static OP *
+    THX_ck_entersub_args_mix(pTHX_ OP *entersubop, GV *namegv, SV *ckobj)
+    {
+        OP *newop = THX_ck_entersub_args(aTHX_ entersubop, namegv, ckobj );
+        newop->op_ppaddr = mix_pp;
         return newop;
     }
 
@@ -127,12 +141,12 @@ BOOT:
     {
     // Installs a classic XS function and returns its CV for later use,
     // provided by ExtUtils::ParseXS::Utilities::standard_XS_defs.
-    CV *cv = newXSproto_portable(
+    CV *cv_mix = newXSproto_portable(
         "Hello::World::mix", THX_xsfunc_mix, __FILE__, "$$$"
     );
 #ifdef USE_CUSTOM_OPS // ! USE_CUSTOM_OPS
         // tie op replacement function to XS function call
-        cv_set_call_checker(cv, THX_ck_entersub_args_mix, (SV*)cv);
+        cv_set_call_checker(cv_mix, THX_ck_entersub_args_mix, (SV*)cv_mix);
         // set up custom op structure, see perlguts.html#Custom-Operators
         static XOP mix_xop;
         XopENTRY_set(&mix_xop, xop_name, "mix_xop");
