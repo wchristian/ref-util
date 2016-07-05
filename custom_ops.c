@@ -38,7 +38,7 @@
 
         /* identify cvop (the last thing on the arg list) */
         OP *cvop = firstargop;
-        while(OpSIBLING( cvop ))
+        while( OpSIBLING( cvop ) )
         {
             cvop = OpSIBLING( cvop );
         }
@@ -47,7 +47,7 @@
         int nargs = 0;
         OP *lastargop = pushop;
         OP *argop = firstargop;
-        while(argop != cvop)
+        while( argop != cvop )
         {
             nargs++;
             lastargop = argop;
@@ -58,20 +58,33 @@
         if(UNLIKELY(nargs != (int)CvPROTOLEN(ckobj)))
           return entersubop;
 
+        if( lastargop == pushop )
+        {
+            // there were no arguments in the first place, so we remove
+            // the last dangling references and mark the arg list as empty
+            firstargop = NULL;
+            lastargop = NULL;
+            argop = NULL;
+        }
+
         /* and prepare to delete the other ops */
         OpMORESIB_set( pushop, cvop ); /* Replace the first op of the arg list with the cvop, which allows
                                           recursive deletion of all unneeded ops while keeping the arg list. */
         /*** entersub( list( push, cv ) ) + ( arg1, arg2, arg3, cv ) */
 
-        OpLASTSIB_set( lastargop, NULL ); /* Remove the trailing cv op from the arg list,
-                                             by declaring the last arg to be the last sibling in the arg list. */
-        /*** entersub( list( push, cv ) ) + ( arg1, arg2, arg3 ) */
+        // only try and cut the cv off the arg list if we have an arg list
+        if( lastargop )
+        {
+            OpLASTSIB_set( lastargop, NULL ); /* Remove the trailing cv op from the arg list,
+                                                 by declaring the last arg to be the last sibling in the arg list. */
+            /*** entersub( list( push, cv ) ) + ( arg1, arg2, arg3 ) */
+        }
 
         op_free( entersubop );    /* Recursively free entersubop + children, as it'll be replaced by the op we return. */
         /*** ( arg1, arg2, arg3 ) */
 
         /* create and return new op */
-        OP *newop = newUNOP( OP_NULL, 0, firstargop );
+        OP *newop = firstargop ? newUNOP( OP_NULL, 0, firstargop ) : newOP( OP_NULL, 0 );
         newop->op_type   = OP_CUSTOM; /* can't do this in the new above, due to crashes pre-5.22 */
         /*** custom_op( arg1, arg2, arg3 ) */
 
