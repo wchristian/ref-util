@@ -89,17 +89,26 @@ THX_xsfunc_mix (pTHX_ CV *cv)
         /*** entersub( list( push, arg1, arg2, arg3, cv ) ) + ( arg1, arg2, arg3, cv ) */
 
         /* identify cvop (the last thing on the arg list) */
-        OP *cvop;
-        for (cvop = firstargop; OpSIBLING( cvop ); cvop = OpSIBLING( cvop )) ;
+        OP *cvop = firstargop;
+        while(OpSIBLING( cvop ))
+        {
+            cvop = OpSIBLING( cvop );
+        }
 
         /* identify the last actual arg */
-        OP *lastargop, *argop;
-        int nargs;
-        for (nargs = 0, lastargop = pushop, argop = firstargop;
-             argop != cvop;
-             lastargop = argop, argop = OpSIBLING( argop ))
-                nargs++;
-        if(UNLIKELY(nargs != (int)CvPROTOLEN(ckobj))) return entersubop;
+        int nargs = 0;
+        OP *lastargop = pushop;
+        OP *argop = firstargop;
+        while(argop != cvop)
+        {
+            nargs++;
+            lastargop = argop;
+            argop = OpSIBLING( argop );
+        }
+
+        /* default to the original XS function if the arg count doesn't match */
+        if(UNLIKELY(nargs != (int)CvPROTOLEN(ckobj)))
+          return entersubop;
 
         /* and prepare to delete the other ops */
         OpMORESIB_set( pushop, cvop ); /* Replace the first op of the arg list with the cvop, which allows
