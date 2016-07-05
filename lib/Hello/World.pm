@@ -7,7 +7,7 @@ use XSLoader;
 use Exporter 5.57 'import';
 
 our $VERSION     = '0.021';
-our %EXPORT_TAGS = ( 'all' => [ qw< mix > ] );
+our %EXPORT_TAGS = ( 'all' => [ qw< mix distance > ] );
 our @EXPORT      = ();
 our @EXPORT_OK   = ( @{ $EXPORT_TAGS{'all'} } );
 
